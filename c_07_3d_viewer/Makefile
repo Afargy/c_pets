@@ -1,0 +1,105 @@
+C = gcc
+CC = gcc -c
+ARCR= ar cr
+RLIB = ranlib
+RM = rm -rf
+GENHTML = genhtml
+
+SOURCE = *.c
+TESTS = tests/*c
+OBJ = *.o
+ARCHIVE = viewer.a
+ALLEX = $(OBJ) $(ARCHIVE) a.out *.gch *.gcno *.info *.gcda report *.tgz
+EXGCOVREP = a.out *.gcno *.info *.gcda
+
+RUN_OUT = ./a.out
+OS := $(shell uname)
+
+WFLAGS = -Wall -Werror -Wextra -std=c11 -pedantic
+# WFLAGS = -Wall -Werror -Wextra 
+LFLAGS = -lm -lpthread -lcheck
+DFLAGS = -fprofile-arcs -ftest-coverage
+VALGRIND_FLAGS = --quiet --leak-check=full --track-origins=yes --trace-children=yes --log-file=valgrind_results.txt 
+
+ifeq ($(shell uname), Linux)
+LFLAGS = -lcheck -lsubunit -lm -lrt -lpthread
+endif
+
+QMAKE = qmake6
+
+COPY = 3dViewer.app/Contents/MacOS/3dViewer ../build
+
+ifeq ($(shell uname), Linux)
+COPY = 3dViewer ../build
+endif
+
+all: clean install
+
+install:
+	mkdir build
+	cd viewer && $(QMAKE) && make && mv $(COPY) && make clean && cd ..
+
+uninstall:
+	make -C viewer/ uninstall
+	make -C viewer/ distclean
+	rm -rf build
+
+dist:
+	if [ ! -e build ]; then make install ; fi
+	@if [ -e Archive_Viewer_v1.0 ]; then rm -rf Archive_Viewer_v1.0 ; fi
+	mkdir Archive_Viewer_v1.0
+	mkdir Archive_Viewer_v1.0/src
+	mv ./build/3dViewer Archive_Viewer_v1.0/src/
+	tar cvzf Archive_Viewer_v1.0.tgz Archive_Viewer_v1.0/
+	rm -rf Archive_Viewer_v1.0/
+
+dvi:
+	open description.txt
+
+clean: 
+	@if [ -e Archive_Viewer_v1.0 ]; then rm -rf Archive_Viewer_v1.0 ; fi
+	@if [ -e build ]; then rm -rf build ; fi
+	@if [ -e calc/Makefile ]; then rm calc/Makefile ; fi
+	$(RM) $(ALLEX)
+
+
+$(ARCHIVE):
+	$(CC) $(WFLAGS) $(SOURCE)
+	$(ARCR) $(ARCHIVE) $(OBJ)
+	$(RLIB) $(ARCHIVE)
+	$(RM) $(OBJ)
+
+test: $(ARCHIVE)
+	$(CC) $(TESTS)
+	$(C) $(OBJ) -L. $(ARCHIVE) $(LFLAGS)
+	$(RM) $(OBJ)
+	$(RUN_OUT)
+
+gcov: gcov_report
+
+gcov_report: $(ARCHIVE)
+	$(C) $(DFLAGS) $(SOURCE) $(TESTS) $(LFLAGS)
+	$(RUN_OUT)
+	lcov -t "test" -o *.info -c -d .
+	$(GENHTML) -o report/ *info
+	open ./report/index.html
+	$(RM) $(EXGCOVREP)
+
+style:
+	cp ../materials/linters/.clang-format .
+	cp ../materials/linters/.clang-format ./tests
+	cp ../materials/linters/.clang-format ./viewer/
+	clang-format -n *.c *.h tests/*.c viewer/*.cpp viewer/*.h
+	rm .clang-format tests/.clang-format viewer/.clang-format
+
+leak: test
+	leaks -atExit -- ./a.out
+
+valgrind:	valgrind_build
+
+valgrind_build: $(ARCHIVE)
+	$(CC) $(TESTS) -g
+	$(C) $(OBJ) -L. $(ARCHIVE) $(LFLAGS)
+	$(RM) $(OBJ)
+	CK_FORK=no valgrind $(VALGRIND_FLAGS) ./a.out
+	
